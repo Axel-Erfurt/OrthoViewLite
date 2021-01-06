@@ -19,7 +19,8 @@ from matplotlib.figure import Figure
 import numpy as np
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget,QAction, QFileDialog, QMenu, 
-                             QToolBar, QHBoxLayout, QTreeView, QFileSystemModel, QSizePolicy)
+                             QToolBar, QHBoxLayout, QTreeView, QFileSystemModel, QSizePolicy, 
+                             QMessageBox)
 from PyQt5.QtCore import Qt, QDir, QStandardPaths, QFileInfo
 import matplotlib.backends.backend_qt5agg as mpl_qt
 
@@ -105,7 +106,9 @@ class OrthoView(QMainWindow):
         super(OrthoView, self).__init__(parent)
 
         self.setWindowTitle('OrthoViewLite')
-        self.setStyleSheet("QMainWindow {background: #e9e9e9;} QHBoxLayout {background: #e9e9e9;} QTreeView {background: #e9e9e9;}  FigureCanvasQTAgg {background: #e9e9e9;}")
+        self.setStyleSheet("QMainWindow {background: #e9e9e9;} QHBoxLayout \
+                            {background: #e9e9e9;} QTreeView {background: #e9e9e9;}  \
+                            FigureCanvasQTAgg {background: #e9e9e9;} QToolBar {border: 0px;}")
         self.setMinimumSize(500, 350)
         self.image_file_path = ""   
         if config.has_option('window', 'win_left') and config.has_option('window', 'win_top') \
@@ -115,12 +118,30 @@ class OrthoView(QMainWindow):
             width = int(config.get('window', 'win_width'))
             height = int(config.get('window', 'win_height'))
             self.setGeometry (left, top, width, height)
+            
+        self.home_path = QStandardPaths.standardLocations(QStandardPaths.PicturesLocation)[0]
 
         self.tb = QToolBar("File")
+        
+        empty = QWidget()
+        empty.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.tb.addWidget(empty)
+        
         open_btn = QAction("Open Image File", self, triggered=self.openFile)
         open_btn.setIcon(QIcon.fromTheme("document-open"))
         self.tb.addAction(open_btn)
-        self.beamPosRectified = [0, 0]
+       
+        go_up_btn = QAction("one level up", self, triggered=self.oneUp)
+        go_up_btn.setIcon(QIcon.fromTheme("go-up"))
+        self.tb.addAction(go_up_btn)
+        
+        go_home_btn = QAction("go to home", self, triggered=self.goHome)
+        go_home_btn.setIcon(QIcon.fromTheme("go-home"))
+        self.tb.addAction(go_home_btn)
+
+        stretch = QWidget()
+        stretch.setFixedWidth(200)
+        self.tb.addWidget(stretch)
 
         self.plotCanvas = MyMplCanvas(self)
         self.plotCanvas.setSizePolicy(
@@ -129,7 +150,8 @@ class OrthoView(QMainWindow):
         for action in self.toolbar.findChildren(QAction):
             if action.text() in ['Customize', 'Subplots']:
                 action.setVisible(False)
-        self.toolbar.locLabel.setAlignment(Qt.AlignCenter)
+        self.toolbar.locLabel.setAlignment(Qt.AlignRight)
+        self.toolbar.locLabel.setFixedWidth(200)
 
         self.tb.setContextMenuPolicy(Qt.PreventContextMenu)
         self.tb.setMovable(False)
@@ -137,9 +159,10 @@ class OrthoView(QMainWindow):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
         self.toolbar.setMovable(False)
         self.toolbar.setAllowedAreas(Qt.TopToolBarArea)
-        self.addToolBar(self.tb)
         self.addToolBar(self.toolbar)
+        self.addToolBar(self.tb)
 
+        
         mylayout = QHBoxLayout()
         mylayout.addWidget(self.plotCanvas)
         
@@ -152,7 +175,8 @@ class OrthoView(QMainWindow):
         self.fileModel.setRootPath(QDir.homePath())
         
         self.mylistwidget.setModel(self.fileModel)
-        self.mylistwidget.setRootIndex(self.fileModel.index(QStandardPaths.standardLocations(QStandardPaths.PicturesLocation)[0]))
+        self.mylistwidget.setRootIndex(self.fileModel.index(self.home_path))
+        #self.mylistwidget.setRootIndex(self.fileModel.index("/"))
         
         self.mylistwidget.selectionModel().selectionChanged.connect(self.on_clicked)
         self.mylistwidget.clicked.connect(self.tree_clicked)
@@ -173,15 +197,25 @@ class OrthoView(QMainWindow):
         self.mylistwidget.setFocus()        
         self.mylistwidget.resizeColumnToContents(1)
 
+    def goHome(self):
+       self.mylistwidget.setRootIndex(self.fileModel.index(self.home_path)) 
+       
+    def oneUp(self):
+       self.mylistwidget.setRootIndex(self.mylistwidget.rootIndex().parent()) 
+
     def on_clicked(self):
         path = self.fileModel.fileInfo(self.mylistwidget.currentIndex()).absoluteFilePath()
         if QDir.exists(QDir(path)):
             print(path, "is folder")
         else:
             if QFileInfo(path).suffix() in self.myfilter:
-                print(path)
-                self.image_file_path = path
-                self.updateFrame()
+                if not os.stat(path).st_size == 0:
+                    print(path)
+                    self.image_file_path = path
+                    self.updateFrame()
+                else:
+                    print("file not exists or has size 0")
+                    self.msgbox("File is empty (size 0)") 
                 
     def tree_clicked(self):
         index = self.mylistwidget.currentIndex()
@@ -196,23 +230,24 @@ class OrthoView(QMainWindow):
         print("open File Dialog")
         path, _ = QFileDialog.getOpenFileName(self, "Open File", self.image_file_path,"Image Files (*.tif *.tiff *.png *.jpg)")
         if path:
-            if os.path.isfile(path):
+            if os.path.isfile(path) and not os.stat(path).st_size == 0:
                 self.image_file_path = path
                 print("file exists:",self.image_file_path)
                 self.updateFrame()
             else:
-                print("file not exists")          
+                print("file not exists or has size 0")      
+                self.msgbox("File is empty (size 0)")    
 
 
     def getFrame(self, path):
         if os.path.isfile(path):
-            #frame = cv2.imread(path, 1)
-            frame = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+            frame = cv2.imread(path, 1)
             if not np.shape(frame) == ():
-                # OpenCV uses BGR as its default colour order for images
                 self.img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             else:
-                print("no image!")
+                print("Error!")
+                frame = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+                self.img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         else:
             self.openFile()
 
@@ -231,6 +266,11 @@ class OrthoView(QMainWindow):
         
         with open(iniApp, 'w+') as cf:
             config.write(cf)
+
+    def msgbox(self, message):
+        msg = QMessageBox(2, "Error", message, QMessageBox.Ok)
+        msg.exec()
+
 
 
 if __name__ == "__main__":
